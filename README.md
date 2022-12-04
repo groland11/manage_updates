@@ -13,8 +13,8 @@ Manage YAML configuration files for operating system updates via Puppet
 
 ## Usage
 ```
-./manage_updates.py -h
-usage: manage_updates.py [on|off|status] [-h] [-v] [-d]
+./manage-updates.py -h
+usage: manage-updates.py [on|off|status] [-h] [-v] [-d]
 
 Switch updates on/off
 
