@@ -45,6 +45,7 @@ YAML_DIR = "/appl/puppet/enc"
 class Mode(Enum):
     ON = 'on'
     OFF = 'off'
+    UPDATE = 'update'
     STATUS = 'status'
 
     @classmethod
@@ -85,6 +86,7 @@ def parseargs() -> argparse.Namespace:
     sp = parser.add_subparsers(dest="mode")
     mode_sp = sp.add_parser(Mode.ON.value)
     mode_sp = sp.add_parser(Mode.OFF.value)
+    mode_sp = sp.add_parser(Mode.UPDATE.value)
     mode_sp = sp.add_parser(Mode.STATUS.value)
 
     args = parser.parse_args()
@@ -210,7 +212,7 @@ class Updates:
             try:
                 update_mode = data['properties']['updates']
                 logger.debug(f"{f}: updates = {update_mode}")
-                print(f"{f.replace('.yaml', '')} - updates: {update_mode}")
+                logger.info(f"{f.replace('.yaml', '')} - updates: {update_mode}")
             except KeyError as e:
                 logger.debug(f"No updates for {f}")
                 
@@ -230,28 +232,48 @@ class Updates:
                     msg = "security updates OFF"
                 else:
                     msg ="unknown updates status"
-                print(f"Hosts with {msg:>20}: {value:>3}")
+                logger.info(f"Hosts with {msg:>20}: {value:>3}")
 
     def write_config(self):
         """Write new configuration to YAML files"""
-        logger.debug(f"New mode: {self._mode}")
+        logger.debug(f"Write new mode: {self._mode}")
+        downtime = False
+
+        if self.check_downtime():
+            logger.info(f"Downtime detected in config file: {self.current_downtime}")
+            downtime = True
+            if self._mode == Mode.ON:
+                logger.warning(f"Aborting because updates cannot be enabled in a downtime.")
+                return
 
         for f, data in self._yaml_files.items():
-            update_mode = data['properties']['updates']
+            old_mode = data['properties']['updates']
+            new_mode = ""
 
             # Switching updates on
-            if self._mode == Mode.ON.value and update_mode == "security_off":
-                data['properties']['updates'] = "security"
-                with open(os.path.join(self._yaml_dir, f), 'w') as yaml_file:
-                    data1 = yaml.dump(data, yaml_file)
-                    logger.debug(f"{f}: updates = security")
+            if self._mode == Mode.ON:
+                new_mode = "security"
 
             # Switching updates off
-            if self._mode == Mode.OFF.value and update_mode == "security":
-                data['properties']['updates'] = "security_off"
+            if self._mode == Mode.OFF:
+                new_mode = "none"
+
+            # Temporarily disabling updates in downtime and switching back after downtime
+            if self._mode == Mode.UPDATE:
+                if downtime:
+                    if old_mode == "security":
+                        new_mode = "security_off"
+                else:
+                    if old_mode == "security_off":
+                        new_mode = "security"
+
+            # Writing new mode to YAML file
+            if new_mode != "" and old_mode != "":
+                data['properties']['updates'] = new_mode
                 with open(os.path.join(self._yaml_dir, f), 'w') as yaml_file:
-                    data1 = yaml.dump(data, yaml_file)
-                    logger.debug(f"{f}: updates = security_off")
+                    if not DEBUG:
+                        data1 = yaml.dump(data, yaml_file)
+                    logger.debug(f"{f}: updates = {new_mode}")
 
     def check_downtime(self) -> bool:
         """ Check if downtime is configured for today
@@ -317,6 +339,9 @@ def main():
     args = parseargs()
     get_logger(args.logfile, args.debug)
 
+    if args.debug:
+        DEBUG = True
+
     # Ensure that only one script runs at a time
     lock = fasteners.InterProcessLock(lockfile)
     if not lock.acquire(timeout=1):
@@ -328,6 +353,8 @@ def main():
         mode = Mode(args.mode)
     except ValueError:
         mode = None
+    else:
+        logger.info(f"Running as user {os.getlogin()}: {mode.value}")
 
     updates = Updates(mode, args.yaml_dir, args.config_file)
     # Read configuration files
@@ -342,19 +369,10 @@ def main():
             # Mode "status"
             if mode == Mode.STATUS:
                 updates.statistics(quiet=args.quiet)
-            # Mode "on" / "off"
+            # Mode "on" / "off" / "update"
             elif mode:
-                if updates.check_downtime():
-                    logger.info(f"Downtime detected in config file: {updates.current_downtime}")
-
-                    if mode == Mode.ON:
-                        logger.warning(f"Overriding command line mode: Switching OFF updates")
-                        updates.mode = Mode.OFF
-                        updates.write_config()
-                    elif mode == Mode.OFF:
-                        logger.warning(f"Aborting because updates cannot be disabled in a downtime.")
-
-                    updates.statistics(quiet=False)
+                updates.write_config()
+                updates.statistics(quiet=False)
         except ValueError as e:
             logger.error(f"Invalid configuration of downtimes {updates.downtimes}")
             logger.debug(f"{e}")
