@@ -1,0 +1,7 @@
+classes:
+  - Server
+ - Application
+  - Logging
+properties:
+  ip: 10.0.0.3
+  hostname: server3.example.com

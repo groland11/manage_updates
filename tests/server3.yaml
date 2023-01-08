@@ -1,0 +1,8 @@
+classes:
+- Server
+- Application
+- Logging
+properties:
+  hostname: server3.example.com
+  ip: 10.0.0.3
+  updates: none

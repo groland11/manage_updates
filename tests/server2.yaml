@@ -1,0 +1,8 @@
+classes:
+- Server
+- Mysql
+- Logging
+properties:
+  hostname: server2.example.com
+  ip: 10.0.0.2
+  updates: none
