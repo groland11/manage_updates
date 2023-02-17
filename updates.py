@@ -209,11 +209,12 @@ class Updates:
         stats = {"security": 0, "security_off": 0, "none": 0}
 
         for f, data in dict(sorted(self._yaml_files.items())).items():
+            update_mode = ""
             try:
-                update_mode = data['properties']['updates']
+                update_mode = data['parameters']['updates']
                 logger.debug(f"{f}: updates = {update_mode}")
                 logger.info(f"{f.replace('.yaml', '')} - updates: {update_mode}")
-            except KeyError as e:
+            except Exception as e:
                 logger.debug(f"No updates for {f}")
                 
             counter = stats.get(update_mode)
@@ -225,17 +226,18 @@ class Updates:
         if not quiet:
             for key, value in stats.items():
                 if key.strip() == "none":
-                    msg = "no updates"
+                    msg = "with security updates OFF"
                 elif key.strip() == "security":
-                    msg = "security updates ON"
+                    msg = "with security updates ON"
                 elif key.strip() == "security_off":
-                    msg = "security updates OFF"
+                    msg = "in temp. DOWNTIME"
                 else:
-                    msg ="unknown updates status"
-                logger.info(f"Hosts with {msg:>20}: {value:>3}")
+                    msg ="without updates configured"
+                logger.info(f"Hosts {msg:>26}: {value:>3}")
 
     def write_config(self):
         """Write new configuration to YAML files"""
+        global DEBUG
         logger.debug(f"Write new mode: {self._mode}")
         downtime = False
 
@@ -247,7 +249,12 @@ class Updates:
                 return
 
         for f, data in self._yaml_files.items():
-            old_mode = data['properties']['updates']
+            try:
+                old_mode = data['parameters']['updates']
+            except Exception as e:
+                logger.debug(f"Skipping write for {f}")
+                continue
+
             new_mode = ""
 
             # Switching updates on
@@ -269,11 +276,16 @@ class Updates:
 
             # Writing new mode to YAML file
             if new_mode != "" and old_mode != "":
-                data['properties']['updates'] = new_mode
-                with open(os.path.join(self._yaml_dir, f), 'w') as yaml_file:
-                    if not DEBUG:
-                        data1 = yaml.dump(data, yaml_file)
-                    logger.debug(f"{f}: updates = {new_mode}")
+                data['parameters']['updates'] = new_mode
+                if not DEBUG:
+                    with open(os.path.join(self._yaml_dir, f), 'w') as yaml_file:
+                        #data1 = yaml.dump(data, yaml_file)
+                        # Hack for Python 3.6 which does not intend YAML lists
+                        stream = yaml.dump(data, default_flow_style=False, indent=4, sort_keys=False)
+                        yaml_file.write(stream.replace('\n-', '\n    -'))
+                        logger.debug(f"{f}: updates = {new_mode}")
+                else:
+                    logger.debug(f"{f}: updates = {new_mode} (not updated in debug mode)")
 
     def check_downtime(self) -> bool:
         """ Check if downtime is configured for today
@@ -332,6 +344,7 @@ class Updates:
 
 def main():
     """Main program flow"""
+    global DEBUG
     ret = 0 # Return code of script
     lockfile = "/var/run/updates.lock" # Lockfile to prevent multiple instances running simultaneously
 
